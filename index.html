@@ -3,30 +3,85 @@
 
 <head>
 
+<meta charset="UTF-8">
+
 <meta name="viewport"
-content="width=device-width, initial-scale=1">
+content="width=device-width, initial-scale=1.0">
+
+<title>Delivery Bot</title>
 
 <style>
 
 body{
 
-background:#111;
-color:white;
+margin:0;
+padding:0;
+background:#0f172a;
 font-family:Arial;
+color:white;
 text-align:center;
-padding-top:20px;
+overflow-x:hidden;
+}
+
+.container{
+
+padding:20px;
+}
+
+h1{
+
+font-size:38px;
+margin-top:10px;
+}
+
+.status{
+
+margin-top:10px;
+font-size:20px;
+font-weight:bold;
+}
+
+.connected{
+
+color:#00ff88;
+}
+
+.disconnected{
+
+color:red;
+}
+
+.controls{
+
+margin-top:30px;
+}
+
+.row{
+
+display:flex;
+justify-content:center;
+align-items:center;
+gap:15px;
+margin:15px;
 }
 
 button{
 
 width:100px;
 height:100px;
-font-size:30px;
-margin:10px;
+font-size:35px;
 border:none;
-border-radius:20px;
+border-radius:25px;
 background:#00bcd4;
 color:white;
+font-weight:bold;
+box-shadow:0 5px 15px rgba(0,0,0,0.4);
+transition:0.2s;
+}
+
+button:active{
+
+transform:scale(0.92);
 }
 
 .stop{
@@ -34,28 +89,44 @@ color:white;
 background:red;
 }
 
+.routeBox{
+
+margin-top:40px;
+}
+
 input{
 
 width:80%;
-padding:15px;
+max-width:500px;
+padding:18px;
 font-size:20px;
-border-radius:10px;
 border:none;
-margin-top:20px;
+border-radius:15px;
+outline:none;
 }
 
-#status{
+.runBtn{
 
 margin-top:20px;
-font-size:22px;
-color:#0f0;
+width:180px;
+height:70px;
+font-size:28px;
+background:#22c55e;
 }
 
-.instructions{
+.info{
 
-margin-top:20px;
-font-size:18px;
+margin-top:30px;
 line-height:35px;
+font-size:18px;
+color:#cbd5e1;
+}
+
+.footer{
+
+margin-top:40px;
+font-size:16px;
+color:#94a3b8;
 }
 
 </style>
@@ -64,74 +135,132 @@ line-height:35px;
 
 <body>
 
-<h1>🤖 ROBOT CONTROL</h1>
+<div class="container">
 
-<div>
+<h1>🤖 DELIVERY BOT</h1>
 
-<button onclick="send('W')">
-↑
-</button>
-
-</div>
-
-<div>
-
-<button onclick="send('A')">
-←
-</button>
-
-<button class="stop"
-onclick="send('X')">
-STOP
-</button>
-
-<button onclick="send('D')">
-→
-</button>
-
-</div>
-
-<div>
-
-<button onclick="send('S')">
-↓
-</button>
-
-</div>
-
-<h2>Automation</h2>
-
-<input id="route"
-placeholder="F200,R90,F100">
-
-<br><br>
-
-<button onclick="sendRoute()">
-RUN
-</button>
-
-<div class="instructions">
-
-W → Forward<br>
-S → Reverse<br>
-A → Left<br>
-D → Right<br>
-SPACE → Emergency Stop
-
-</div>
-
-<div id="status">
+<div id="status"
+class="status disconnected">
 
 DISCONNECTED
 
 </div>
 
+<!-- CONTROLS -->
+
+<div class="controls">
+
+<div class="row">
+
+<button onclick="send('W')">
+
+↑
+
+</button>
+
+</div>
+
+<div class="row">
+
+<button onclick="send('A')">
+
+←
+
+</button>
+
+<button class="stop"
+onclick="send('X')">
+
+STOP
+
+</button>
+
+<button onclick="send('D')">
+
+→
+
+</button>
+
+</div>
+
+<div class="row">
+
+<button onclick="send('S')">
+
+↓
+
+</button>
+
+</div>
+
+</div>
+
+<!-- AUTOMATION -->
+
+<div class="routeBox">
+
+<h2>Automation Route</h2>
+
+<input id="route"
+placeholder="F200,R90,F100,L45">
+
+<br>
+
+<button class="runBtn"
+onclick="sendRoute()">
+
+RUN
+
+</button>
+
+</div>
+
+<!-- INFO -->
+
+<div class="info">
+
+W → Forward<br>
+S → Reverse<br>
+A → Left<br>
+D → Right<br>
+SPACE → Emergency Stop<br><br>
+
+Examples:<br>
+
+F200 = Forward 200cm<br>
+
+R90 = Rotate Right 90°<br>
+
+L45 = Rotate Left 45°<br>
+
+B100 = Backward 100cm
+
+</div>
+
+<div class="footer">
+
+robot.local websocket control
+
+</div>
+
+</div>
+
 <script>
 
+// =====================================================
+// WEBSOCKET
+// =====================================================
+
+// AUTO DETECT USING MDNS
+
 let gateway =
-"ws://192.168.31.84:81/";
+"ws://robot.local:81/";
 
 let websocket;
+
+// =====================================================
+// CONNECT
+// =====================================================
 
 function initWebSocket(){
 
@@ -143,6 +272,10 @@ websocket.onopen = function(){
 document.getElementById(
 "status").innerHTML =
 "CONNECTED";
+
+document.getElementById(
+"status").className =
+"status connected";
 };
 
 websocket.onclose = function(){
@@ -151,14 +284,38 @@ document.getElementById(
 "status").innerHTML =
 "DISCONNECTED";
 
-setTimeout(initWebSocket,2000);
+document.getElementById(
+"status").className =
+"status disconnected";
+
+setTimeout(
+initWebSocket,
+2000);
+};
+
+websocket.onerror = function(){
+
+console.log(
+"WebSocket Error");
 };
 }
 
+// =====================================================
+// SEND
+// =====================================================
+
 function send(cmd){
+
+if(websocket &&
+websocket.readyState === 1){
 
 websocket.send(cmd);
 }
+}
+
+// =====================================================
+// ROUTE
+// =====================================================
 
 function sendRoute(){
 
@@ -166,10 +323,15 @@ let route =
 document.getElementById(
 "route").value;
 
-websocket.send(route);
+if(route.length > 0){
+
+send(route);
+}
 }
 
-// KEYBOARD CONTROL
+// =====================================================
+// KEYBOARD CONTROLS
+// =====================================================
 
 document.addEventListener(
 'keydown',
@@ -178,21 +340,53 @@ function(event){
 let key =
 event.key.toLowerCase();
 
-if(key=='w') send('W');
+// FORWARD
+if(key == 'w'){
 
-if(key=='a') send('A');
+send('W');
+}
 
-if(key=='s') send('S');
+// LEFT
+if(key == 'a'){
 
-if(key=='d') send('D');
+send('A');
+}
 
-if(event.code=='Space'){
+// BACKWARD
+if(key == 's'){
+
+send('S');
+}
+
+// RIGHT
+if(key == 'd'){
+
+send('D');
+}
+
+// EMERGENCY STOP
+if(event.code == 'Space'){
 
 event.preventDefault();
 
 send('X');
 }
 });
+
+// =====================================================
+// AUTO STOP ON KEY RELEASE
+// =====================================================
+
+document.addEventListener(
+'keyup',
+function(){
+
+send('X');
+});
+
+// =====================================================
+// START
+// =====================================================
 
 window.onload =
 initWebSocket;
