@@ -1,398 +1,605 @@
-<!DOCTYPE html>
-<html>
-
-<head>
-
-<meta charset="UTF-8">
-
-<meta name="viewport"
-content="width=device-width, initial-scale=1.0">
-
-<title>Delivery Bot</title>
-
-<style>
-
-body{
-
-margin:0;
-padding:0;
-background:#0f172a;
-font-family:Arial;
-color:white;
-text-align:center;
-overflow-x:hidden;
-}
-
-.container{
-
-padding:20px;
-}
-
-h1{
-
-font-size:38px;
-margin-top:10px;
-}
-
-.status{
-
-margin-top:10px;
-font-size:20px;
-font-weight:bold;
-}
-
-.connected{
-
-color:#00ff88;
-}
-
-.disconnected{
-
-color:red;
-}
-
-.controls{
-
-margin-top:30px;
-}
-
-.row{
-
-display:flex;
-justify-content:center;
-align-items:center;
-gap:15px;
-margin:15px;
-}
-
-button{
-
-width:100px;
-height:100px;
-font-size:35px;
-border:none;
-border-radius:25px;
-background:#00bcd4;
-color:white;
-font-weight:bold;
-box-shadow:0 5px 15px rgba(0,0,0,0.4);
-transition:0.2s;
-}
-
-button:active{
-
-transform:scale(0.92);
-}
-
-.stop{
-
-background:red;
-}
-
-.routeBox{
-
-margin-top:40px;
-}
-
-input{
-
-width:80%;
-max-width:500px;
-padding:18px;
-font-size:20px;
-border:none;
-border-radius:15px;
-outline:none;
-}
-
-.runBtn{
-
-margin-top:20px;
-width:180px;
-height:70px;
-font-size:28px;
-background:#22c55e;
-}
-
-.info{
-
-margin-top:30px;
-line-height:35px;
-font-size:18px;
-color:#cbd5e1;
-}
-
-.footer{
-
-margin-top:40px;
-font-size:16px;
-color:#94a3b8;
-}
-
-</style>
-
-</head>
-
-<body>
-
-<div class="container">
-
-<h1>🤖 DELIVERY BOT</h1>
-
-<div id="status"
-class="status disconnected">
-
-DISCONNECTED
-
-</div>
-
-<!-- CONTROLS -->
-
-<div class="controls">
-
-<div class="row">
-
-<button onclick="send('W')">
-
-↑
-
-</button>
-
-</div>
-
-<div class="row">
-
-<button onclick="send('A')">
-
-←
-
-</button>
-
-<button class="stop"
-onclick="send('X')">
-
-STOP
-
-</button>
-
-<button onclick="send('D')">
-
-→
-
-</button>
-
-</div>
-
-<div class="row">
-
-<button onclick="send('S')">
-
-↓
-
-</button>
-
-</div>
-
-</div>
-
-<!-- AUTOMATION -->
-
-<div class="routeBox">
-
-<h2>Automation Route</h2>
-
-<input id="route"
-placeholder="F200,R90,F100,L45">
-
-<br>
-
-<button class="runBtn"
-onclick="sendRoute()">
-
-RUN
-
-</button>
-
-</div>
-
-<!-- INFO -->
-
-<div class="info">
-
-W → Forward<br>
-S → Reverse<br>
-A → Left<br>
-D → Right<br>
-SPACE → Emergency Stop<br><br>
-
-Examples:<br>
-
-F200 = Forward 200cm<br>
-
-R90 = Rotate Right 90°<br>
-
-L45 = Rotate Left 45°<br>
-
-B100 = Backward 100cm
-
-</div>
-
-<div class="footer">
-
-robot.local websocket control
-
-</div>
-
-</div>
-
-<script>
+#include <WiFi.h>
+#include <WiFiManager.h>
+#include <WebSocketsServer.h>
+#include <ESPmDNS.h>
+#include <Wire.h>
+#include <MPU6050_tockn.h>
+
+// =====================================================
+// WIFI MANAGER
+// =====================================================
+
+WiFiManager wm;
 
 // =====================================================
 // WEBSOCKET
 // =====================================================
 
-// AUTO DETECT USING MDNS
-
-let gateway =
-"ws://robot.local:81/";
-
-let websocket;
+WebSocketsServer webSocket(81);
 
 // =====================================================
-// CONNECT
+// MOTOR PINS
 // =====================================================
 
-function initWebSocket(){
+// RIGHT SIDE
+#define IN1 18
+#define IN2 19
 
-websocket =
-new WebSocket(gateway);
+// LEFT SIDE
+#define IN3 25
+#define IN4 33
 
-websocket.onopen = function(){
+// =====================================================
+// ULTRASONIC
+// =====================================================
 
-document.getElementById(
-"status").innerHTML =
-"CONNECTED";
+#define TRIG_F 4
+#define ECHO_F 16
 
-document.getElementById(
-"status").className =
-"status connected";
-};
+// =====================================================
+// ENCODER
+// =====================================================
 
-websocket.onclose = function(){
+#define ENCODER_PIN 26
 
-document.getElementById(
-"status").innerHTML =
-"DISCONNECTED";
+volatile long pulseCount = 0;
+volatile unsigned long lastPulse = 0;
 
-document.getElementById(
-"status").className =
-"status disconnected";
+// =====================================================
+// WHEEL
+// =====================================================
 
-setTimeout(
-initWebSocket,
-2000);
-};
+float wheelCircumference = 35.5;
 
-websocket.onerror = function(){
+// 8 black marker lines
+int slots = 8;
 
-console.log(
-"WebSocket Error");
-};
+float cmPerPulse =
+    wheelCircumference / slots;
+
+// =====================================================
+// MPU6050
+// =====================================================
+
+MPU6050 mpu6050(Wire);
+
+// =====================================================
+// CONTROL
+// =====================================================
+
+String command = "X";
+
+unsigned long lastCommandTime = 0;
+
+// =====================================================
+// ENCODER INTERRUPT
+// =====================================================
+
+void IRAM_ATTR countPulse() {
+
+  unsigned long now = micros();
+
+  // strong debounce
+  if (now - lastPulse > 50000) {
+
+    pulseCount++;
+
+    lastPulse = now;
+  }
 }
 
 // =====================================================
-// SEND
+// MOTOR FUNCTIONS
 // =====================================================
 
-function send(cmd){
+void stopBot() {
 
-if(websocket &&
-websocket.readyState === 1){
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
 
-websocket.send(cmd);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
 }
+
+void forwardBot() {
+
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void backwardBot() {
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+}
+
+void leftBot() {
+
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+}
+
+void rightBot() {
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
 }
 
 // =====================================================
-// ROUTE
+// DISTANCE
 // =====================================================
 
-function sendRoute(){
+float getDistanceCM() {
 
-let route =
-document.getElementById(
-"route").value;
-
-if(route.length > 0){
-
-send(route);
-}
+  return pulseCount * cmPerPulse;
 }
 
 // =====================================================
-// KEYBOARD CONTROLS
+// ULTRASONIC
 // =====================================================
 
-document.addEventListener(
-'keydown',
-function(event){
+long getFrontDistance() {
 
-let key =
-event.key.toLowerCase();
+  digitalWrite(TRIG_F, LOW);
+  delayMicroseconds(2);
 
-// FORWARD
-if(key == 'w'){
+  digitalWrite(TRIG_F, HIGH);
+  delayMicroseconds(10);
 
-send('W');
+  digitalWrite(TRIG_F, LOW);
+
+  long duration =
+      pulseIn(ECHO_F, HIGH, 30000);
+
+  return duration * 0.034 / 2;
 }
-
-// LEFT
-if(key == 'a'){
-
-send('A');
-}
-
-// BACKWARD
-if(key == 's'){
-
-send('S');
-}
-
-// RIGHT
-if(key == 'd'){
-
-send('D');
-}
-
-// EMERGENCY STOP
-if(event.code == 'Space'){
-
-event.preventDefault();
-
-send('X');
-}
-});
 
 // =====================================================
-// AUTO STOP ON KEY RELEASE
+// FORWARD DISTANCE
 // =====================================================
 
-document.addEventListener(
-'keyup',
-function(){
+void moveForwardCM(float targetCM) {
 
-send('X');
-});
+  pulseCount = 0;
+
+  stopBot();
+
+  delay(300);
+
+  while (getDistanceCM() < targetCM) {
+
+    long front =
+        getFrontDistance();
+
+    if (front > 0 && front < 20) {
+
+      stopBot();
+
+      Serial.println("OBSTACLE");
+
+      return;
+    }
+
+    forwardBot();
+
+    mpu6050.update();
+
+    Serial.print("DISTANCE: ");
+    Serial.println(getDistanceCM());
+
+    delay(5);
+  }
+
+  stopBot();
+
+  delay(300);
+}
 
 // =====================================================
-// START
+// BACKWARD DISTANCE
 // =====================================================
 
-window.onload =
-initWebSocket;
+void moveBackwardCM(float targetCM) {
 
-</script>
+  pulseCount = 0;
 
-</body>
+  stopBot();
 
-</html>
+  delay(300);
+
+  while (getDistanceCM() < targetCM) {
+
+    backwardBot();
+
+    mpu6050.update();
+
+    Serial.print("DISTANCE: ");
+    Serial.println(getDistanceCM());
+
+    delay(5);
+  }
+
+  stopBot();
+
+  delay(300);
+}
+
+// =====================================================
+// LEFT TURN
+// =====================================================
+
+void turnLeftDeg(float targetAngle) {
+
+  stopBot();
+
+  delay(500);
+
+  mpu6050.update();
+
+  float startAngle =
+      mpu6050.getAngleZ();
+
+  float currentAngle = 0;
+
+  while (currentAngle < targetAngle) {
+
+    mpu6050.update();
+
+    currentAngle =
+        abs(
+          mpu6050.getAngleZ()
+          - startAngle
+        );
+
+    leftBot();
+
+    Serial.print("LEFT: ");
+    Serial.println(currentAngle);
+
+    delay(8);
+  }
+
+  stopBot();
+
+  delay(500);
+}
+
+// =====================================================
+// RIGHT TURN
+// =====================================================
+
+void turnRightDeg(float targetAngle) {
+
+  stopBot();
+
+  delay(500);
+
+  mpu6050.update();
+
+  float startAngle =
+      mpu6050.getAngleZ();
+
+  float currentAngle = 0;
+
+  while (currentAngle < targetAngle) {
+
+    mpu6050.update();
+
+    currentAngle =
+        abs(
+          mpu6050.getAngleZ()
+          - startAngle
+        );
+
+    rightBot();
+
+    Serial.print("RIGHT: ");
+    Serial.println(currentAngle);
+
+    delay(8);
+  }
+
+  stopBot();
+
+  delay(500);
+}
+
+// =====================================================
+// ROUTE EXECUTION
+// =====================================================
+
+void executeRoute(String route) {
+
+  int startIndex = 0;
+
+  while (startIndex < route.length()) {
+
+    int commaIndex =
+        route.indexOf(',',
+                      startIndex);
+
+    if (commaIndex == -1) {
+
+      commaIndex =
+          route.length();
+    }
+
+    String cmd =
+        route.substring(
+            startIndex,
+            commaIndex);
+
+    cmd.trim();
+
+    char action =
+        cmd.charAt(0);
+
+    float value =
+        cmd.substring(1).toFloat();
+
+    if (action == 'F') {
+
+      moveForwardCM(value);
+    }
+
+    else if (action == 'B') {
+
+      moveBackwardCM(value);
+    }
+
+    else if (action == 'L') {
+
+      turnLeftDeg(value);
+    }
+
+    else if (action == 'R') {
+
+      turnRightDeg(value);
+    }
+
+    delay(500);
+
+    startIndex =
+        commaIndex + 1;
+  }
+
+  stopBot();
+}
+
+// =====================================================
+// WEBSOCKET EVENT
+// =====================================================
+
+void webSocketEvent(
+    uint8_t num,
+    WStype_t type,
+    uint8_t * payload,
+    size_t length) {
+
+  if (type == WStype_TEXT) {
+
+    String msg =
+        (char*)payload;
+
+    Serial.println(msg);
+
+    // RESET WIFI
+    if (msg == "RESET_WIFI") {
+
+      Serial.println(
+          "RESETTING WIFI");
+
+      wm.resetSettings();
+
+      delay(1000);
+
+      ESP.restart();
+
+      return;
+    }
+
+    // AUTOMATION
+    if (msg.indexOf("F") >= 0
+        || msg.indexOf("L") >= 0
+        || msg.indexOf("R") >= 0
+        || msg.indexOf("B") >= 0) {
+
+      executeRoute(msg);
+
+      return;
+    }
+
+    command = msg;
+
+    lastCommandTime =
+        millis();
+  }
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup() {
+
+  Serial.begin(115200);
+
+  // =================================================
+  // SAFE MOTOR STARTUP
+  // =================================================
+
+  pinMode(IN1, OUTPUT);
+  digitalWrite(IN1, LOW);
+
+  pinMode(IN2, OUTPUT);
+  digitalWrite(IN2, LOW);
+
+  pinMode(IN3, OUTPUT);
+  digitalWrite(IN3, LOW);
+
+  pinMode(IN4, OUTPUT);
+  digitalWrite(IN4, LOW);
+
+  stopBot();
+
+  delay(3000);
+
+  // =================================================
+  // ULTRASONIC
+  // =================================================
+
+  pinMode(TRIG_F, OUTPUT);
+  pinMode(ECHO_F, INPUT);
+
+  // =================================================
+  // ENCODER
+  // =================================================
+
+  pinMode(
+      ENCODER_PIN,
+      INPUT_PULLUP);
+
+  attachInterrupt(
+      digitalPinToInterrupt(
+          ENCODER_PIN),
+      countPulse,
+      FALLING);
+
+  // =================================================
+  // MPU6050
+  // =================================================
+
+  Wire.begin(21, 22);
+
+  delay(1000);
+
+  mpu6050.begin();
+
+  Serial.println(
+      "KEEP ROBOT STILL");
+
+  mpu6050.calcGyroOffsets(true);
+
+  Serial.println(
+      "GYRO READY");
+
+  // =================================================
+  // AP + STA MODE
+  // =================================================
+
+  WiFi.mode(WIFI_AP_STA);
+
+  // permanent setup hotspot
+  WiFi.softAP(
+      "DeliveryBot_Setup");
+
+  Serial.println(
+      "SETUP AP ACTIVE");
+
+  Serial.println(
+      WiFi.softAPIP());
+
+  // =================================================
+  // WIFI MANAGER
+  // =================================================
+
+  bool result =
+      wm.autoConnect(
+          "DeliveryBot_Setup");
+
+  if (!result) {
+
+    Serial.println(
+        "WIFI FAILED");
+
+  } else {
+
+    Serial.println(
+        "WIFI CONNECTED");
+
+    Serial.println(
+        WiFi.localIP());
+  }
+
+  // =================================================
+  // MDNS
+  // =================================================
+
+  if (MDNS.begin("robot")) {
+
+    Serial.println(
+        "MDNS STARTED");
+
+    Serial.println(
+        "robot.local");
+  }
+
+  // =================================================
+  // WEBSOCKET
+  // =================================================
+
+  webSocket.begin();
+
+  webSocket.onEvent(
+      webSocketEvent);
+
+  Serial.println(
+      "ROBOT READY");
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop() {
+
+  webSocket.loop();
+
+  mpu6050.update();
+
+  // auto stop
+  if (millis()
+      - lastCommandTime > 200) {
+
+    command = "X";
+  }
+
+  if (command == "W") {
+
+    forwardBot();
+  }
+
+  else if (command == "S") {
+
+    backwardBot();
+  }
+
+  else if (command == "A") {
+
+    leftBot();
+  }
+
+  else if (command == "D") {
+
+    rightBot();
+  }
+
+  else {
+
+    stopBot();
+  }
+
+  delay(5);
+}
