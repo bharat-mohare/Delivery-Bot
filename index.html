@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<meta name="viewport"
+content="width=device-width, initial-scale=1">
+
+<style>
+
+body{
+
+background:#111;
+color:white;
+font-family:Arial;
+text-align:center;
+padding-top:20px;
+}
+
+button{
+
+width:100px;
+height:100px;
+font-size:30px;
+margin:10px;
+border:none;
+border-radius:20px;
+background:#00bcd4;
+color:white;
+}
+
+.stop{
+
+background:red;
+}
+
+input{
+
+width:80%;
+padding:15px;
+font-size:20px;
+border-radius:10px;
+border:none;
+margin-top:20px;
+}
+
+#status{
+
+margin-top:20px;
+font-size:22px;
+color:#0f0;
+}
+
+.instructions{
+
+margin-top:20px;
+font-size:18px;
+line-height:35px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<h1>🤖 ROBOT CONTROL</h1>
+
+<div>
+
+<button onclick="send('W')">
+↑
+</button>
+
+</div>
+
+<div>
+
+<button onclick="send('A')">
+←
+</button>
+
+<button class="stop"
+onclick="send('X')">
+STOP
+</button>
+
+<button onclick="send('D')">
+→
+</button>
+
+</div>
+
+<div>
+
+<button onclick="send('S')">
+↓
+</button>
+
+</div>
+
+<h2>Automation</h2>
+
+<input id="route"
+placeholder="F200,R90,F100">
+
+<br><br>
+
+<button onclick="sendRoute()">
+RUN
+</button>
+
+<div class="instructions">
+
+W → Forward<br>
+S → Reverse<br>
+A → Left<br>
+D → Right<br>
+SPACE → Emergency Stop
+
+</div>
+
+<div id="status">
+
+DISCONNECTED
+
+</div>
+
+<script>
+
+let gateway =
+"ws://192.168.31.84:81/";
+
+let websocket;
+
+function initWebSocket(){
+
+websocket =
+new WebSocket(gateway);
+
+websocket.onopen = function(){
+
+document.getElementById(
+"status").innerHTML =
+"CONNECTED";
+};
+
+websocket.onclose = function(){
+
+document.getElementById(
+"status").innerHTML =
+"DISCONNECTED";
+
+setTimeout(initWebSocket,2000);
+};
+}
+
+function send(cmd){
+
+websocket.send(cmd);
+}
+
+function sendRoute(){
+
+let route =
+document.getElementById(
+"route").value;
+
+websocket.send(route);
+}
+
+// KEYBOARD CONTROL
+
+document.addEventListener(
+'keydown',
+function(event){
+
+let key =
+event.key.toLowerCase();
+
+if(key=='w') send('W');
+
+if(key=='a') send('A');
+
+if(key=='s') send('S');
+
+if(key=='d') send('D');
+
+if(event.code=='Space'){
+
+event.preventDefault();
+
+send('X');
+}
+});
+
+window.onload =
+initWebSocket;
+
+</script>
+
+</body>
+
+</html>
